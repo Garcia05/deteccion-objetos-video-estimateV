@@ -11,7 +11,18 @@ import torch
 from torch.autograd import Variable
 from sort import *
 
+tracker = Sort()
+memory = {}
+time_id={}
+velocidad_d ={}
+time_test = {}
+time_for_speed = []
+dict_id_speed = {}
+def intersect(A,B,C,D):
+    return ccw(A,C,D) != ccw(B,C,D) and ccw(A,B,C) != ccw(A,B,D)
 
+def ccw(A,B,C):
+    return (C[1]-A[1]) * (B[0]-A[0]) > (B[1]-A[1]) * (C[0]-A[0])
 def Convertir_RGB(img):
     # Convertir Blue, green, red a Red, green, blue
     b = img[:, :, 0].copy()
@@ -49,9 +60,14 @@ if __name__ == "__main__":
     parser.add_argument("--directorio_video", type=str, help="Directorio al video")
     parser.add_argument("--checkpoint_model", type=str, help="path to checkpoint model")
     opt = parser.parse_args()
+
+
+
     print(opt)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
     model = Darknet(opt.model_def, img_size=opt.img_size).to(device)
 
 
@@ -73,8 +89,14 @@ if __name__ == "__main__":
         out = cv2.VideoWriter('outp.mp4',cv2.VideoWriter_fourcc('M','J','P','G'), 10, (1280,960))
     colors = np.random.randint(0, 255, size=(len(classes), 3), dtype="uint8")
     a=[]
+    (W, H) = (None, None)
+    lx1 , ly1 ,lx2 , ly2  = 50,480,620,480
+    l2x1 , l2y1 ,l2x2 , l2y2 = 660,850,1250,850
+    line_speed_start = [(lx1,ly1), (lx2,ly2)]
+    line_speed_end = [(l2x1,l2y1), (l2x2, l2y2)]
     while cap:
         ret, frame = cap.read()
+        time_start = np.round(time.time(),3)
         if ret is False:
             break
         frame = cv2.resize(frame, (1280, 960), interpolation=cv2.INTER_CUBIC)
@@ -86,14 +108,101 @@ if __name__ == "__main__":
         imgTensor = imgTensor.unsqueeze(0)
         imgTensor = Variable(imgTensor.type(Tensor))
 
-
+        start = 0.0
+        end = 0.0
+        if W is None or H is None:
+            (H, W) = frame.shape[:2]
         with torch.no_grad():
             detections = model(imgTensor)
+            start = time.time()
             detections = non_max_suppression(detections, opt.conf_thres, opt.nms_thres)
-        lx1 , ly1 ,lx2 , ly2  = 50,480,620,480
-        l2x1 , l2y1 ,l2x2 , l2y2 = 660,850,1250,850
+            end = time.time()
         xx1,yy1 = 0,0
         aa = 0
+        boxes = []
+        center = []
+        confidences = []
+        classIDs = []
+        for detection in detections:
+            if detection is not None:
+                detection = rescale_boxes(detection, opt.img_size, RGBimg.shape[:2])
+                for x1, y1, x2, y2, conf, cls_conf, cls_pred in detection:
+                    scores= [cls_conf,cls_pred]
+                    classID = np.argmax(scores)
+                    confidence = scores[classID]
+                    if(confidence > opt.conf_thres):
+                      width = x2 - x1
+                      height = y2 - y1
+                      centerX = width/2 + x1
+                      centerY = height/2 + y1
+                      if(lx2 >= centerX and centerY >= ly2 or l2x1 <= centerX and centerY <= l2y2 and centerY >= ly2):
+                        x = int(centerX - (width / 2))
+                        y = int(centerY - (height / 2))
+                        center.append(int(centerY))
+                        boxes.append([x,y,int(width),int(height)])
+                        #boxes.append([int(x1),int(y1+height),int(x2),int(y1)])
+                        confidences.append(float(confidence))
+                        classIDs.append(classID)
+        
+        idxs = cv2.dnn.NMSBoxes(boxes, confidences, opt.conf_thres, opt.nms_thres)
+        #print(idxs)
+        dets = []
+        if len(idxs) > 0:
+            # loop over the indexes we are keeping
+            for i in idxs.flatten():
+                (x, y) = (boxes[i][0], boxes[i][1])
+                (w, h) = (boxes[i][2], boxes[i][3])
+                dets.append([x, y, x+w, y+h, confidences[i]])
+                #print(confidences[i])
+                #print(center[i])
+        np.set_printoptions(formatter={'float': lambda x: "{0:0.3f}".format(x)})
+        dets = np.asarray(dets)
+        tracks = tracker.update(dets)
+        boxes = []
+        indexIDs = []
+        c = []
+        
+        previous = memory.copy()
+
+        memory = {}
+        for track in tracks:
+            boxes.append([track[0], track[1], track[2], track[3]])
+            indexIDs.append(int(track[4]))
+
+            memory[indexIDs[-1]] = boxes[-1]
+        if(len(boxes)>0):
+          i = int(0)
+          for box in boxes:
+            (x, y) = (int(box[0]), int(box[1]))
+            (w, h) = (int(box[2]), int(box[3]))
+            color = [int(c) for c in colors[indexIDs[i]*100 %80]]
+            #color = [int(c) for c in COLORS[classIDs[i]]]
+            #color = (255,0,0) if ct1==1 else (0,255,0) if ct2==1 else (255,0,255) if ct3==1 else (0,255,255) if ct4==1 else (0,0,255)
+            
+            cv2.rectangle(frame, (x, y), (w, h), color, 4)
+            
+            if indexIDs[i] in previous:
+              previous_box = previous[indexIDs[i]]
+              (x2, y2) = (int(previous_box[0]), int(previous_box[1]))
+              (w2, h2) = (int(previous_box[2]), int(previous_box[3]))
+              p0 = (int(x + (w-x)/2), int(y + (h-y)/2))
+              p1 = (int(x2 + (w2-x2)/2), int(y2 + (h2-y2)/2))
+              cv2.line(frame, p0, p1, color, 3)
+
+              id = indexIDs[i]
+            
+              speed = 0
+              
+              speed = abs(y-y2)/0.2
+              print("velocidad",speed)
+              
+             #speed = speed = abs(y-y2)/
+              cv2.putText(frame, str(speed), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 5)
+            i += 1
+            print(time_id)
+        cv2.line(frame,(lx1,ly1),(lx2,ly2),(255,0,0),5)
+        cv2.line(frame,(l2x1,l2y1),(l2x2,l2y2),(0,255,0),5)   
+        '''
         for detection in detections:
             if detection is not None:
                 detection = rescale_boxes(detection, opt.img_size, RGBimg.shape[:2])
@@ -101,11 +210,12 @@ if __name__ == "__main__":
                     box_w = x2 - x1
                     box_h = y2 - y1
                     xx1 = box_w/2 + x1
+                    print(cls_pred)
                     yy1 = box_h/2 + y1
                     if(lx2 > xx1 and yy1 > ly2):
                       aa = abs(yy1 - ly2)
                       color = [int(c) for c in colors[int(cls_pred)]]
-                      print(cls_conf)
+                      
                       #print("Se detectó {} en X1: {}, Y1: {}, X2: {}, Y2: {}".format(classes[int(cls_pred)], x1, y1, x2, y2))
                       cv2.line(frame,(lx1,ly1),(lx2,ly2),(255,0,0),5)
                       cv2.line(frame,(l2x1,l2y1),(l2x2,l2y2),(0,255,0),5)
@@ -116,7 +226,7 @@ if __name__ == "__main__":
                     elif(l2x1 < xx1 and yy1 < l2y2 and yy1 > ly2):
                       aa = abs(yy1 - l2y2)
                       color = [int(c) for c in colors[int(cls_pred)]]
-                      print("Se detectó {} en X1: {}, Y1: {}, X2: {}, Y2: {}".format(classes[int(cls_pred)], x1, y1, x2, y2))
+                      #print("Se detectó {} en X1: {}, Y1: {}, X2: {}, Y2: {}".format(classes[int(cls_pred)], x1, y1, x2, y2))
                       cv2.line(frame,(lx1,ly1),(lx2,ly2),(255,0,0),5)
                       cv2.line(frame,(l2x1,l2y1),(l2x2,l2y2),(0,255,0),5)
                       frame = cv2.rectangle(frame, (x1, y1 + box_h), (x2, y1), color, 3)
@@ -126,7 +236,7 @@ if __name__ == "__main__":
                     else :
                       cv2.line(frame,(lx1,ly1),(lx2,ly2),(255,0,0),5)
                       cv2.line(frame,(l2x1,l2y1),(l2x2,l2y2),(0,255,0),5)
-
+              '''
         #Convertimos de vuelta a BGR para que cv2 pueda desplegarlo en los colores correctos
         
         if opt.webcam==1:
