@@ -135,14 +135,15 @@ if __name__ == "__main__":
                       height = y2 - y1
                       centerX = width/2 + x1
                       centerY = height/2 + y1
-                      if(lx2 >= centerX and centerY >= ly2 or l2x1 <= centerX and centerY <= l2y2 and centerY >= ly2):
-                        x = int(centerX - (width / 2))
-                        y = int(centerY - (height / 2))
-                        center.append(int(centerY))
-                        boxes.append([x,y,int(width),int(height)])
+                      #if(lx2 >= centerX and centerY >= ly2 or l2x1 <= centerX and centerY <= l2y2 and centerY >= ly2):
+                      x = int(centerX - (width / 2))
+                      y = int(centerY - (height / 2))
+                      center.append(int(centerY))
+                      boxes.append([x,y,int(width),int(height)])
                         #boxes.append([int(x1),int(y1+height),int(x2),int(y1)])
-                        confidences.append(float(confidence))
-                        classIDs.append(classID)
+                      confidences.append(float(confidence))
+                      classIDs.append(classID)
+
         
         idxs = cv2.dnn.NMSBoxes(boxes, confidences, opt.conf_thres, opt.nms_thres)
         #print(idxs)
@@ -163,7 +164,7 @@ if __name__ == "__main__":
         c = []
         
         previous = memory.copy()
-
+        print(previous)
         memory = {}
         for track in tracks:
             boxes.append([track[0], track[1], track[2], track[3]])
@@ -180,7 +181,7 @@ if __name__ == "__main__":
             #color = (255,0,0) if ct1==1 else (0,255,0) if ct2==1 else (255,0,255) if ct3==1 else (0,255,255) if ct4==1 else (0,0,255)
             
             cv2.rectangle(frame, (x, y), (w, h), color, 4)
-            
+            print(indexIDs)
             if indexIDs[i] in previous:
               previous_box = previous[indexIDs[i]]
               (x2, y2) = (int(previous_box[0]), int(previous_box[1]))
@@ -197,11 +198,11 @@ if __name__ == "__main__":
               print("velocidad",speed)
               
              #speed = speed = abs(y-y2)/
-              cv2.putText(frame, str(speed), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 5)
+              cv2.putText(frame, str(len(previous)), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 5)
             i += 1
             print(time_id)
-        cv2.line(frame,(lx1,ly1),(lx2,ly2),(255,0,0),5)
-        cv2.line(frame,(l2x1,l2y1),(l2x2,l2y2),(0,255,0),5)   
+        #cv2.line(frame,(lx1,ly1),(lx2,ly2),(255,0,0),5)
+        #cv2.line(frame,(l2x1,l2y1),(l2x2,l2y2),(0,255,0),5)   
         '''
         for detection in detections:
             if detection is not None:
